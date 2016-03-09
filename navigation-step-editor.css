@@ -2,6 +2,12 @@
   padding-left: 200px;
   transition: all .2s ease-in-out;
 }
+._XPATH_BODY .spm-dialog.spg-navigation{
+  margin-left: 200px;
+}
+.xpath-selected-dom.spm-navigation-float.spm-navigation-relative{
+  z-index: 10000000
+}
 #_XPATH_TOOLBAR{
   position: fixed;
   z-index: 10000000;
@@ -70,7 +76,8 @@
   height: 100%;
   width: 200%;
   padding: 0 20px;
-  background: rgba(0,0,0,.5);
+  background: rgba(255,255,255,.8);
+  box-shadow: 0 0 4px rgba(0,0,0,.3);
 }
 .xpath-setting-save-confirm strong{
   display: block;

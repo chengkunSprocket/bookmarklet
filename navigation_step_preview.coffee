@@ -32,13 +32,15 @@ files = [
   {
     type: 'css'
     #src: '//stg-sprocket-assets.s3.amazonaws.com/bookmarklets/css/navigation-step-editor.css?t=' + new Date().getTime()
-    src: '//localhost:8888/navigation-step-editor.css?t=' + new Date().getTime()
+    src: 'http://localhost:8888/navigation-step-editor.css?t=' + new Date().getTime()
   }
   {
     type: 'script'
     src: '//cdnjs.cloudflare.com/ajax/libs/zeroclipboard/2.2.0/ZeroClipboard.min.js'
   }
 ]
+
+resourcesUrl = '//api-stg.sb.v2.sprocket.bz/services/5c310cf1d573489a92e9c05d6e93d77d/keys/074ff728fe384fc29a926e7aa4f28f8a/resources/gears_navigation'
 
 config =
   bodyClass: '_XPATH_BODY'
@@ -57,7 +59,7 @@ window._XPATH_INIT = true
 $addClass = (ele, className) ->
   originClass = ele.className
   if originClass.indexOf(className) is -1
-    ele.className += " #{className}"
+    ele.className += " #{className} "
 
 $removeClass = (ele, className) ->
   originClass = ele.className
@@ -85,6 +87,26 @@ xpath = (el) ->
   if sames.length > 1
     t = '['+([].indexOf.call(sames, el) + 1 ) + ']'
   return xpath(el.parentNode) + '/' + el.tagName.toLowerCase() + t
+
+cpath = (el) ->
+  names = []
+  while el.parentNode
+    if el.id
+      names.unshift '#' + el.id
+      break
+    else
+      if el == el.ownerDocument.documentElement
+        names.unshift el.tagName.toLowerCase()
+      else
+        c = 1
+        e = el
+        while e.previousElementSibling
+          e = e.previousElementSibling
+          c++
+        names.unshift el.tagName.toLowerCase() + ':nth-child(' + c + ')'
+      el = el.parentNode
+  names.join ' > '
+
 
 getSize = (dom) ->
   style = dom.getBoundingClientRect()
@@ -131,10 +153,9 @@ app = $extend app,
   toolbarRender: ->
     template = [
       '<div id="_XPATH_TOOLBAR" class="xpath-start-hide">'
-        '<textarea class="xpath-container" readOnly="true" v-model="selected.xpath"></textarea>'
-        '<button class="xpath-start">Start</button>'
-        '<button class="xpath-stop">Stop</button>'
-        '<form class="xpath-setting">'
+        '<textarea class="xpath-container" v-model="selected.resourcePath"></textarea>'
+        '<button class="xpath-init" @click="formatData()">Init</button>'
+        '<div class="xpath-setting" v-show="!!selected.formatStatus">'
           '<div class="xpath-step-type">'
             '<p>表示タイプ</p>'
             '<label v-for="type in config.type" class="type-{{type}}">'
@@ -144,7 +165,7 @@ app = $extend app,
           '</div>'
           '<div class="xpath-step-modal" v-show="selected.type != \'toast\'">'
             '<p>モーダル</p>'
-            '<label class="position-top"><input type="checkbox" name="modal" v-model="selected.noModal"> なし</label>'
+            '<label class="position-top"><input type="checkbox" name="modal" v-model="selected.useModal"> あり</label>'
           '</div>'
           '<div class="xpath-step-position" v-show="selected.type != \'dialog\'">'
             '<p>表示位置</p>'
@@ -153,12 +174,17 @@ app = $extend app,
               '{{position}}'
             '</label>'
           '</div>'
+          '<div v-if="selected.type === \'balloon\'">'
+            '<textarea id="SP_copy_textarea" class="xpath-container" readOnly="true" v-model="selected.cpath"></textarea>'
+            '<button v-el:copy class="xpath-copy-selector" data-clipboard-target="SP_copy_textarea">'
+              '<span v-show="selected.copyStatus">Copy success!</span><span v-show="!selected.copyStatus">Copy</span>'
+            '</button>'
+          '</div>'
           '<div class="xpath-step-button" v-show="showButton()">'
             '<button type="button" class="xpath-preview" @click="preview()">Preview</button>'
-            '<button type="button" class="xpath-clear" @click="clear()">Clear</button>'
-            '<button type="button" class="xpath-save" @click="done()">決めた</button>'
+            '<button type="button" class="xpath-clear" @click="clear()">Reset</button>'
           '</div>'
-        '</form>'
+        '</div>'
       '</div>'
     ].join ''
     toolbarComponent = Vue.extend
@@ -168,23 +194,66 @@ app = $extend app,
         console.log 'toolbar ready'
         this.$on 'element-selected', (data) ->
           that.selected.xpath = data.xpath
+          that.selected.cpath = data.cpath
           cl = document.evaluate(data.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
-          that.selected.dom = cl
+          cd = $ data.cpath
+          that.selected.dom = cd[0]
           $addClass that.selected.dom, 'xpath-selected-dom'
+
+        this.loadResource()
+        this.initCopy()
+
       data: ->
         config:
           type: ['toast', 'balloon', 'dialog']
           position: ['top', 'bottom', 'left', 'right']
         selected:
+          formatStatus: false
+          cpath: ''
           xpath: ''
-          noModal: false
+          useModal: true
           type: 'toast'
           position: 'top'
+        initCopy: ->
+          that = this
+          copyBtn = @$els.copy
+          client = new ZeroClipboard copyBtn
+          client.on 'ready', ->
+            client.on 'aftercopy', ->
+              alert 'copy success'
+              that.selected.copyStatus = true
         showButton: ->
           if not @selected.type or (@selected.type isnt 'dialog' and not @selected.position)
             return false
           else
             return true
+        loadResource: ->
+          that = this
+          $.get resourcesUrl, (response) ->
+            that.resource = response.resource
+          , 'json'
+
+        formatData: ->
+          path = @selected.resourcePath
+          result = {}
+          reg = /(scenario[0-9]+)-(phase[0-9]+)-(pattern[0-9]+)-(step.+)/
+          path = path.replace reg, (matched, $1, $2, $3, $4) ->
+            result = [ $1, 'phases', $2, 'patterns', $3, 'steps', $4]
+
+          resource = @resource.scenarios
+          for key, index in result
+            if index is result.length - 1
+              filter = resource.filter (step) ->
+                return step if step.id is key
+              resource = filter[0]
+            else
+              resource = resource[key]
+          @selected.type = resource.type
+          @selected.position = resource.placement
+          @selected.data = resource.data
+          @selected.formatStatus = true
+
+
         preview: ->
           app.parentVue.$broadcast 'preview-action', @selected
         clear: ->
@@ -232,8 +301,10 @@ app = $extend app,
             return
           event.stopPropagation()
           p = xpath target
+          c = cpath target
           app.parentVue.$broadcast 'element-selected',
             xpath: p
+            cpath: c
         , true
       data: ->
         styles:
@@ -258,7 +329,7 @@ app = $extend app,
       ready: ->
         that = this
         this.$on 'preview-action', (selected) ->
-          that.modal = not selected.noModal and selected.type isnt 'toast'
+          that.modal = selected.useModal and selected.type isnt 'toast'
         this.$on 'clear-action', ->
           that.modal = false
       data: ->
@@ -269,14 +340,14 @@ app = $extend app,
 
   stepRender: (type) ->
     template = [
-      '<div v-el:container :style="styles.step" class="spm-{{selected.type}} {{selected.position}} spg-navigation {{animation}}">'
+      '<div v-show="selected.type" v-el:container :style="styles.step" class="spm-{{selected.type}} {{selected.position}} spg-navigation {{animation}}">'
         '<button type="button" class="spm-{{selected.type}}-close" @click="destroy()"></button>'
         '<div class="spm-balloon-arrow" v-if="selected.type === \'balloon\'"></div>'
-        '<h3 class="spm-{{selected.type}}-title" contenteditable="true" v-el:title>{{title}}</h3>'
-        '<div class="spm-{{selected.type}}-content" contenteditable="true" v-el:content>{{* content}}</div>'
+        '<h3 class="spm-{{selected.type}}-title" v-el:title>{{selected.data.title}}</h3>'
+        '<div class="spm-{{selected.type}}-content" v-el:content>{{selected.data.content}}</div>'
         '<div class="xpath-position-update spm-balloon-button" v-show="isUpdated()">Update</div>'
         '<div class="spm-{{selected.type}}-nav">'
-          '<div class="spm-{{selected.type}}-button">{{button}}</div>'
+          '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button">{{button.label}}</div>'
         '</div>'
       '</div>'
       '<div v-el:light v-show="selected.type === \'balloon\'" :style="styles.light" class="spm-navigation-navlayer"></div>'
@@ -313,9 +384,6 @@ app = $extend app,
           light:
             left: 0
             top: 0
-        title: 'KPIのページ'
-        content: 'ページを跨ぎます。ページを跨ぎます。'
-        button: '次へ'
         animation: 'fade in'
         setSize: (settings) ->
           @size = settings if settings
@@ -334,9 +402,11 @@ app = $extend app,
               transition: 'all 0.2s ease-in-out'
             if that.selected.type is 'balloon'
               delta = 20
-              selectElement = document.evaluate(that.selected.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
-              selectElement.className = selectElement.className + 'spm-navigation-float spm-navigation-relative'
+              #selectElement = document.evaluate(that.selected.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
+              selectElement = $(that.selected.cpath)[0]
+              $addClass selectElement, 'spm-navigation-float spm-navigation-relative'
               selectSize = getSize selectElement
+              $(that.$els.container).show()
               that.setSize()
               X = selectSize.left
               Y = selectSize.top
@@ -344,7 +414,7 @@ app = $extend app,
               W = selectSize.width
               h = that.size.height
               w = that.size.width
-
+              console.log selectSize, that.size
               switch that.selected.position
                 when 'top'
                   x = X + (W - w) / 2
@@ -412,7 +482,7 @@ app = $extend app,
   doneRender: ->
     template = [
       '<div class="xpath-setting-save-confirm" v-show="selected.done">'
-        '<form target="//api-stg.sb.v2.sprocket.bz">'
+        '<div target="//api-stg.sb.v2.sprocket.bz">'
           '{{selected}}'
           '<strong>表示タイプ</strong>'
           '<div class="xpath-save-content">{{selected.type}}</div>'
@@ -421,8 +491,8 @@ app = $extend app,
           '<strong>タイトル</strong>'
           '<div class="xpath-save-content">{{selected.title}}</div>'
           '<strong>コンテンツ</strong>'
-          '<div class="xpath-save-content">{{selected.centent}}</div>'
-        '</form>'
+          '<div class="xpath-save-content">{{selected.content}}</div>'
+        '</div>'
         '<div class="xpath-setting-html"></div>'
         '<a class="xpath-copy">コピー</a>'
         '<a class="xpath-cancel">キャンセル</a>'
@@ -441,7 +511,6 @@ app = $extend app,
           done: false
         render: (selected) ->
           this.selected = $extend this.selected, selected
-          console.log this.selected
 
     Vue.component 'done-layer', doneComponent
     this.done = new Vue this.options
