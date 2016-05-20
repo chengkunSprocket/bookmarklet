@@ -1,5 +1,20 @@
 body = document.querySelector 'body'
 
+env =
+  stg:
+    api: 'api-stg.sb.v2.sprocket.bz'
+    config: 'api-admin-stg.sb.v2.sprocket.bz/dev'
+    asset: 'stg-sprocket-assets.s3.amazonaws.com'
+  sb:
+    api: 'api.sb.v2.sprocket.bz'
+    config: 'api-admin.sb.v2.sprocket.bz/dev'
+    asset: 'sb-sprocket-assets.s3.amazonaws.com'
+  pd:
+    api: 'api.v2.sprocket.bz'
+    config: 'api-admin.v2.sprocket.bz/prod'
+    asset: 'sprocket-assets.s3.amazonaws.com'
+
+
 tools =
   insert: (file) ->
     head = document.querySelector 'head'
@@ -31,16 +46,13 @@ files = [
   }
   {
     type: 'css'
-    #src: '//stg-sprocket-assets.s3.amazonaws.com/bookmarklets/css/navigation-step-editor.css?t=' + new Date().getTime()
-    src: 'http://localhost:8888/navigation-step-editor.css?t=' + new Date().getTime()
+    src: '//stg-sprocket-assets.s3.amazonaws.com/bookmarklets/css/navigation-step-editor.css?t=' + new Date().getTime()
   }
   {
     type: 'script'
     src: '//cdnjs.cloudflare.com/ajax/libs/zeroclipboard/2.2.0/ZeroClipboard.min.js'
   }
 ]
-
-resourcesUrl = '//api-stg.sb.v2.sprocket.bz/services/5c310cf1d573489a92e9c05d6e93d77d/keys/074ff728fe384fc29a926e7aa4f28f8a/resources/gears_navigation'
 
 config =
   bodyClass: '_XPATH_BODY'
@@ -153,6 +165,11 @@ app = $extend app,
   toolbarRender: ->
     template = [
       '<div id="_XPATH_TOOLBAR" class="xpath-start-hide">'
+        '<div class="dev-choose">'
+          '<span @click="selected.dev = \'stg\'" v-bind:class="{ \'dev-active\': selected.dev === \'stg\'}">STG</span>'
+          '<span @click="selected.dev = \'sb\'" v-bind:class="{ \'dev-active\': selected.dev === \'sb\'}">SB</span>'
+          '<span @click="selected.dev = \'v2\'" v-bind:class="{ \'dev-active\': selected.dev === \'v2\'}">PD</span>'
+        '</div>'
         '<textarea class="xpath-container" v-model="selected.resourcePath"></textarea>'
         '<button class="xpath-init" @click="formatData()">Init</button>'
         '<div class="xpath-setting" v-show="!!selected.formatStatus">'
@@ -160,7 +177,7 @@ app = $extend app,
             '<p>表示タイプ</p>'
             '<label v-for="type in config.type" class="type-{{type}}">'
               '<input type="radio" name="type" value="{{type}}" v-model="selected.type">'
-              '{{type}}'
+              ' {{type}}'
             '</label>'
           '</div>'
           '<div class="xpath-step-modal" v-show="selected.type != \'toast\'">'
@@ -171,7 +188,7 @@ app = $extend app,
             '<p>表示位置</p>'
             '<label v-for="position in config.position" class="position-{{position}}">'
               '<input type="radio" name="position" value="{{position}}" v-model="selected.position">'
-              '{{position}}'
+              ' {{position}}'
             '</label>'
           '</div>'
           '<div v-if="selected.type === \'balloon\'">'
@@ -200,7 +217,6 @@ app = $extend app,
           that.selected.dom = cd[0]
           $addClass that.selected.dom, 'xpath-selected-dom'
 
-        this.loadResource()
         this.initCopy()
 
       data: ->
@@ -208,6 +224,8 @@ app = $extend app,
           type: ['toast', 'balloon', 'dialog']
           position: ['top', 'bottom', 'left', 'right']
         selected:
+          dev: 'stg'
+          ids: {}
           formatStatus: false
           cpath: ''
           xpath: ''
@@ -227,31 +245,50 @@ app = $extend app,
             return false
           else
             return true
-        loadResource: ->
+        loadStylesheet: ->
           that = this
-          $.get resourcesUrl, (response) ->
-            that.resource = response.resource
-          , 'json'
+          stylesheetUrl = type: 'css'
+          stylesheetUrl.src = "//#{env[this.selected.dev].asset}/css/#{that.selected.ids.service}/#{that.selected.ids.stylesheet}.css"
+          tools.insert stylesheetUrl
 
         formatData: ->
+          that = this
           path = @selected.resourcePath
-          result = {}
-          reg = /(scenario[0-9]+)-(phase[0-9]+)-(pattern[0-9]+)-(step.+)/
-          path = path.replace reg, (matched, $1, $2, $3, $4) ->
-            result = [ $1, 'phases', $2, 'patterns', $3, 'steps', $4]
-
-          resource = @resource.scenarios
-          for key, index in result
-            if index is result.length - 1
-              filter = resource.filter (step) ->
-                return step if step.id is key
-              resource = filter[0]
-            else
-              resource = resource[key]
-          @selected.type = resource.type
-          @selected.position = resource.placement
-          @selected.data = resource.data
-          @selected.formatStatus = true
+          result = []
+          reg = /^service\(([^\(]+)\)-key\(([^\(]+)\)-\((scenario[0-9]+)\)-\((phase[0-9]+)\)-\((.+)\)-\((.+)\)-\((.+)\)$/
+          path = path.replace reg, (matched, $1, $2, $3, $4, $5, $6, $7) ->
+            that.selected.ids =
+              service: $1
+              key: $2
+              scenario: $3
+              phase: $4
+              pattern: $5
+              step: $6
+              stylesheet: $7
+            result = [
+              that.selected.ids.scenario,
+              'phases', that.selected.ids.phase,
+              'patterns', that.selected.ids.pattern,
+              'steps', that.selected.ids.step
+            ]
+          return unless that.selected.ids.service and that.selected.ids.key
+          @loadStylesheet()
+          resourcesUrl = "//#{env[this.selected.dev].api}/services/#{that.selected.ids.service}/keys/#{that.selected.ids.key}/resources/gears_navigation"
+          $.get resourcesUrl, (response) ->
+            that.resource = response.resource
+            resource = that.resource.scenarios
+            for key, index in result
+              if index is result.length - 1
+                filter = resource.filter (step) ->
+                  return step if step.id is key
+                resource = filter[0]
+              else
+                resource = resource[key]
+            that.selected.type = resource.type
+            that.selected.position = resource.placement
+            that.selected.data = resource.data
+            that.selected.formatStatus = true
+          , 'json'
 
 
         preview: ->
@@ -344,7 +381,7 @@ app = $extend app,
         '<button type="button" class="spm-{{selected.type}}-close" @click="destroy()"></button>'
         '<div class="spm-balloon-arrow" v-if="selected.type === \'balloon\'"></div>'
         '<h3 class="spm-{{selected.type}}-title" v-el:title>{{selected.data.title}}</h3>'
-        '<div class="spm-{{selected.type}}-content" v-el:content>{{selected.data.content}}</div>'
+        '<div class="spm-{{selected.type}}-content" v-el:content>{{{selected.data.content}}}</div>'
         '<div class="xpath-position-update spm-balloon-button" v-show="isUpdated()">Update</div>'
         '<div class="spm-{{selected.type}}-nav">'
           '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button">{{button.label}}</div>'
