@@ -2,9 +2,6 @@
   padding-left: 200px;
   transition: all .2s ease-in-out;
 }
-._XPATH_BODY .spm-dialog.spg-navigation{
-  margin-left: 200px;
-}
 .xpath-selected-dom.spm-navigation-float.spm-navigation-relative{
   z-index: 10000000
 }
@@ -33,7 +30,7 @@
   padding: 5px;
   border-radius: 2px;
   width: 100%;
-  height: 100px;
+  height: 200px;
   display: block;
   color: #333 !important;
   resize: none;

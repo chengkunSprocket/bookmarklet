@@ -42,16 +42,12 @@ tools =
 files = [
   {
     type: 'css'
-    src: '//stg-sprocket-gears.s3.amazonaws.com/navigation/css/navigation.css'
-  }
-  {
-    type: 'css'
     src: '//stg-sprocket-assets.s3.amazonaws.com/bookmarklets/css/navigation-step-editor.css?t=' + new Date().getTime()
   }
-  {
-    type: 'script'
-    src: '//cdnjs.cloudflare.com/ajax/libs/zeroclipboard/2.2.0/ZeroClipboard.min.js'
-  }
+  # {
+  #   type: 'script'
+  #   src: '//cdnjs.cloudflare.com/ajax/libs/zeroclipboard/2.2.0/ZeroClipboard.min.js'
+  # }
 ]
 
 config =
@@ -85,6 +81,17 @@ $extend = (source, target) ->
   for key, value of target
     source[key] = value
   source
+
+$get = (url, callback) ->
+  xhr = new XMLHttpRequest()
+  xhr.open 'GET', url
+  xhr.send null
+  xhr.onreadystatechange = ->
+    DONE = 4
+    OK = 200
+    if xhr.readyState is DONE and xhr.status is OK
+      response = JSON.parse xhr.responseText
+      callback callback(response)
 
 xpath = (el) ->
   if typeof el is "string"
@@ -142,8 +149,6 @@ app = $extend app,
     @toolbarRender()
     @maskRender()
     @modalRender()
-    @stepRender()
-    @doneRender()
 
   insertWrapper: ->
     body.className = body.className + ' ' + config.bodyClass
@@ -166,13 +171,14 @@ app = $extend app,
     template = [
       '<div id="_XPATH_TOOLBAR" class="xpath-start-hide">'
         '<div class="dev-choose">'
-          '<span @click="selected.dev = \'stg\'" v-bind:class="{ \'dev-active\': selected.dev === \'stg\'}">STG</span>'
-          '<span @click="selected.dev = \'sb\'" v-bind:class="{ \'dev-active\': selected.dev === \'sb\'}">SB</span>'
-          '<span @click="selected.dev = \'v2\'" v-bind:class="{ \'dev-active\': selected.dev === \'v2\'}">PD</span>'
+          '<span v-show="selected.dev === \'stg\'">STG</span>'
+          '<span v-show="selected.dev === \'sb\'">SB</span>'
         '</div>'
-        '<textarea class="xpath-container" v-model="selected.resourcePath"></textarea>'
+        '<strong>Sprocketタグを入力してください</strong>'
+        '<textarea class="xpath-container" v-model="selected.resourcePath" v-on:keyup="pathChaned()"></textarea>'
         '<button class="xpath-init" @click="formatData()">Init</button>'
-        '<div class="xpath-setting" v-show="!!selected.formatStatus">'
+        '<button type="button" class="xpath-clear" @click="clear()">Reset</button>'
+        '<div class="xpath-setting" style="display: none;">'
           '<div class="xpath-step-type">'
             '<p>表示タイプ</p>'
             '<label v-for="type in config.type" class="type-{{type}}">'
@@ -191,16 +197,14 @@ app = $extend app,
               ' {{position}}'
             '</label>'
           '</div>'
-          '<div v-if="selected.type === \'balloon\'">'
-            '<textarea id="SP_copy_textarea" class="xpath-container" readOnly="true" v-model="selected.cpath"></textarea>'
-            '<button v-el:copy class="xpath-copy-selector" data-clipboard-target="SP_copy_textarea">'
-              '<span v-show="selected.copyStatus">Copy success!</span><span v-show="!selected.copyStatus">Copy</span>'
-            '</button>'
-          '</div>'
           '<div class="xpath-step-button" v-show="showButton()">'
             '<button type="button" class="xpath-preview" @click="preview()">Preview</button>'
             '<button type="button" class="xpath-clear" @click="clear()">Reset</button>'
           '</div>'
+        '</div>'
+        '<div>'
+          '<strong>CSSセレクト</strong>'
+          '<textarea id="SP_copy_textarea" class="xpath-container" readOnly="true" v-model="selected.cpath"></textarea>'
         '</div>'
       '</div>'
     ].join ''
@@ -213,25 +217,27 @@ app = $extend app,
           that.selected.xpath = data.xpath
           that.selected.cpath = data.cpath
           cl = document.evaluate(data.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
-          cd = $ data.cpath
-          that.selected.dom = cd[0]
+          cd = document.querySelector data.cpath
+          that.selected.dom = cd
           $addClass that.selected.dom, 'xpath-selected-dom'
 
-        this.initCopy()
+        #this.initCopy()
 
       data: ->
+        reg: /^service\(([^\(]+)\)-key\(([^\(]+)\)-\((scenario[0-9]+)\)-\((phase[0-9]+)\)-\((pattern[0-9]+)\)-\((.+)\)-style\((.+)\)-class\((.+)\)$/
         config:
           type: ['toast', 'balloon', 'dialog']
-          position: ['top', 'bottom', 'left', 'right']
+          placement: ['top', 'bottom', 'left', 'right']
         selected:
-          dev: 'stg'
+          dev: ''
+          resourcePath: ''
           ids: {}
           formatStatus: false
           cpath: ''
           xpath: ''
           useModal: true
           type: 'toast'
-          position: 'top'
+          placement: 'top'
         initCopy: ->
           that = this
           copyBtn = @$els.copy
@@ -241,22 +247,32 @@ app = $extend app,
               alert 'copy success'
               that.selected.copyStatus = true
         showButton: ->
-          if not @selected.type or (@selected.type isnt 'dialog' and not @selected.position)
+          if not @selected.type or (@selected.type isnt 'dialog' and not @selected.placement)
             return false
           else
             return true
+
+        pathChaned: ->
+          that = this
+          console.log ('change')
+          path = that.selected.resourcePath
+          that.formatData() if path and path.match that.reg
+
         loadStylesheet: ->
           that = this
           stylesheetUrl = type: 'css'
-          stylesheetUrl.src = "//#{env[this.selected.dev].asset}/css/#{that.selected.ids.service}/#{that.selected.ids.stylesheet}.css"
+          stylesheet = that.selected.ids.stylesheet
+          stylesheet = stylesheet.replace(/^(http:|https:|ftp:)/, '').replace(/\/\//, '')
+          dev = stylesheet.split('-')[0]
+          stylesheetUrl.src = '//' + stylesheet
+          that.selected.dev = if dev is 'stg' or dev is 'sb' then dev else 'pd'
           tools.insert stylesheetUrl
 
         formatData: ->
           that = this
           path = @selected.resourcePath
           result = []
-          reg = /^service\(([^\(]+)\)-key\(([^\(]+)\)-\((scenario[0-9]+)\)-\((phase[0-9]+)\)-\((.+)\)-\((.+)\)-\((.+)\)$/
-          path = path.replace reg, (matched, $1, $2, $3, $4, $5, $6, $7) ->
+          path = path.replace @reg, (matched, $1, $2, $3, $4, $5, $6, $7, $8) ->
             that.selected.ids =
               service: $1
               key: $2
@@ -265,6 +281,7 @@ app = $extend app,
               pattern: $5
               step: $6
               stylesheet: $7
+              className: $8
             result = [
               that.selected.ids.scenario,
               'phases', that.selected.ids.phase,
@@ -274,8 +291,9 @@ app = $extend app,
           return unless that.selected.ids.service and that.selected.ids.key
           @loadStylesheet()
           resourcesUrl = "//#{env[this.selected.dev].api}/services/#{that.selected.ids.service}/keys/#{that.selected.ids.key}/resources/gears_navigation"
-          $.get resourcesUrl, (response) ->
+          $get resourcesUrl, (response) ->
             that.resource = response.resource
+            return unless that.resource
             resource = that.resource.scenarios
             for key, index in result
               if index is result.length - 1
@@ -285,13 +303,33 @@ app = $extend app,
               else
                 resource = resource[key]
             that.selected.type = resource.type
-            that.selected.position = resource.placement
+            that.selected.placement = resource.data.placement
             that.selected.data = resource.data
+            that.selected.data = that.styleCompile(that.selected.data , 'step')
+            for button in that.selected.data.button
+              button = that.styleCompile(button , 'button')
             that.selected.formatStatus = true
+            that.preview()
           , 'json'
 
+        styleCompile: (data, type) ->
+          styles = data.styles
+          return data if not styles
+          if type is 'step'
+            animations = data.animations
+            styles['border-width'] = styles['border-width'] + 'px'
+            styles['font-size'] = styles['font-size'] + 'px'
+          else if type is 'button'
+            if styles.backgroundColorBegin
+              start = styles.backgroundColorBegin
+              end = styles['background-color']
+              styles['background-image'] = "linear-gradient(to bottom, #{start}, #{end})" if start and end
+            else
+              styles['background-image'] = 'none'
+          data
 
         preview: ->
+          app.stepRender @selected
           app.parentVue.$broadcast 'preview-action', @selected
         clear: ->
           app.parentVue.$broadcast 'clear-action'
@@ -337,6 +375,7 @@ app = $extend app,
           if wrapper.contains target or not window._XPATH_STATUS
             return
           event.stopPropagation()
+          event.preventDefault()
           p = xpath target
           c = cpath target
           app.parentVue.$broadcast 'element-selected',
@@ -375,20 +414,230 @@ app = $extend app,
     Vue.component 'modal-layer', modalComponent
     this.modal = new Vue this.options
 
-  stepRender: (type) ->
-    template = [
-      '<div v-show="selected.type" v-el:container :style="styles.step" class="spm-{{selected.type}} {{selected.position}} spg-navigation {{animation}}">'
-        '<button type="button" class="spm-{{selected.type}}-close" @click="destroy()"></button>'
-        '<div class="spm-balloon-arrow" v-if="selected.type === \'balloon\'"></div>'
-        '<h3 class="spm-{{selected.type}}-title" v-el:title>{{selected.data.title}}</h3>'
-        '<div class="spm-{{selected.type}}-content" v-el:content>{{{selected.data.content}}}</div>'
-        '<div class="xpath-position-update spm-balloon-button" v-show="isUpdated()">Update</div>'
-        '<div class="spm-{{selected.type}}-nav">'
-          '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button">{{button.label}}</div>'
+  stepRender: (selected) ->
+    templates =
+      balloon: [
+        '<div class="spm-balloon">'
+          '<button type="button" class="spm-balloon-close"></button>'
+          '<div class="spm-balloon-arrow"></div>'
+          '<h3 class="spm-balloon-title"></h3>'
+          '<div class="spm-balloon-content"></div>'
+          '<div class="spm-balloon-nav"></div>'
         '</div>'
+      ].join ''
+      toast: [
+        '<div class="spm-toast">'
+          '<button type="button" class="spm-toast-close"></button>'
+          '<h3 class="spm-toast-title">{{{selected.data.title}}}</h3>'
+          '<div class="spm-toast-content">{{{selected.data.content}}}</div>'
+          '<div class="spm-toast-nav">'
+            '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      dialog: [
+        '<div class="spm-dialog">'
+          '<div>'
+            '<button type="button" class="spm-dialog-close"></button>'
+            '<h3 class="spm-dialog-title">{{{selected.data.title}}}</h3>'
+            '<div class="spm-dialog-content">{{{selected.data.content}}}</div>'
+            '<div class="spm-dialog-nav">'
+              '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'balloon-type-1': [
+        '<div class="spm-balloon spm-balloon-type1">'
+          '<div>'
+            '<button type="button" class="spm-balloon-close"></button>'
+            '<div class="spm-balloon-arrow"></div>'
+            '<div class="spm-balloon-wrap">'
+              '<div class="spm-navigation-image"></div>'
+              '<div class="spm-balloon-inner">'
+                '<h3 class="spm-balloon-title"></h3>'
+                '<div class="spm-balloon-content"></div>'
+              '</div>'
+            '</div>'
+            '<div class="spm-balloon-nav">'
+              '<div></div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'balloon-type-2': [
+        '<div class="spm-balloon spm-balloon-type2">'
+          '<div>'
+            '<button type="button" class="spm-balloon-close"></button>'
+            '<div class="spm-balloon-arrow"></div>'
+            '<div class="spm-balloon-wrap">'
+              '<div class="spm-navigation-image"></div>'
+              '<div class="spm-balloon-inner">'
+                '<h3 class="spm-balloon-title"></h3>'
+                '<div class="spm-balloon-content"></div>'
+              '</div>'
+            '</div>'
+            '<div class="spm-balloon-nav">'
+              '<div></div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'balloon-type-3': [
+        '<div class="spm-balloon spm-balloon-type3">'
+          '<div>'
+            '<button type="button" class="spm-balloon-close"></button>'
+            '<div class="spm-balloon-arrow"></div>'
+            '<div class="spm-balloon-wrap">'
+              '<div class="spm-balloon-inner">'
+                '<div class="spm-balloon-content"></div>'
+              '</div>'
+              '<div class="spm-balloon-nav"></div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'toast-type-1': [
+        '<div class="spm-toast-type1 spm-toast">'
+          '<div :style="selected.data.styles">'
+            '<button type="button" class="spm-toast-close"></button>'
+            '<h3 class="spm-toast-title">{{{selected.data.title}}}</h3>'
+            '<div class="spm-toast-content">{{{selected.data.content}}}</div>'
+            '<div class="spm-toast-nav">'
+              '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'toast-type-2': [
+        '<div class="spm-toast-type2 spm-toast">'
+          '<div :style="selected.data.styles">'
+            '<button type="button" class="spm-toast-close"></button>'
+            '<div class="spm-toast-wrap">'
+              '<div class="spm-navigation-image">{{{selected.data.contentImage}}}</div>'
+              '<div class="spm-toast-inner">'
+                '<h3 class="spm-toast-title">{{{selected.data.title}}}</h3>'
+                '<div class="spm-toast-content">{{{selected.data.content}}}</div>'
+              '</div>'
+            '</div>'
+            '<div class="spm-toast-nav">'
+              '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'toast-type-3': [
+        '<div class="spm-toast-type3 spm-toast">'
+          '<div :style="selected.data.styles">'
+            '<button type="button" class="spm-toast-close"></button>'
+            '<div class="spm-toast-wrap">'
+              '<div class="spm-toast-inner">'
+                '<h3 class="spm-toast-title">{{{selected.data.title}}}</h3>'
+                '<div class="spm-navigation-image">{{{selected.data.contentImage}}}</div>'
+              '</div>'
+            '</div>'
+            '<div class="spm-toast-nav">'
+              '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'toast-type-4': [
+        '<div class="spm-toast-type4 spm-toast">'
+          '<div :style="selected.data.styles">'
+            '<div class="spm-toast-wrap">'
+              '<div class="spm-toast-inner">'
+                '<h3 class="spm-toast-title">{{{selected.data.title}}}</h3>'
+                '<div class="spm-toast-content">{{{selected.data.content}}}</div>'
+              '</div>'
+            '</div>'
+            '<div class="spm-toast-nav">'
+              '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+            '</div>'
+            '<button type="button" class="spm-toast-close"></button>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'toast-type-5': [
+        '<div class="spm-toast-type5 spm-toast">'
+          '<div :style="selected.data.styles">'
+            '<button type="button" class="spm-toast-close"></button>'
+            '<div class="spm-toast-wrap">'
+              '<div class="spm-toast-inner">'
+                '<div class="spm-navigation-image">{{{selected.data.contentImage}}}</div>'
+              '</div>'
+            '</div>'
+            '<div class="spm-toast-nav">'
+              '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+            '</div>'
+          '</div>'
+        '</div> '
+      ].join ''
+      'toast-type-6': [
+        '<div class="spm-toast-type6 spm-toast">'
+          '<div :style="selected.data.styles">'
+            '<button type="button" class="spm-toast-close"></button>'
+            '<h3 class="spm-toast-title">{{{selected.data.title}}}</h3>'
+            '<div class="spm-toast-wrap">'
+              '<div class="spm-toast-inner">'
+                '<div class="spm-toast-content">{{{selected.data.content}}}</div>'
+              '</div>'
+              '<div class="spm-toast-nav"></div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'toast-type-7': [
+        '<div class="spm-toast-type7 spm-toast">'
+          '<div :style="selected.data.styles">'
+            '<button type="button" class="spm-toast-close"></button>'
+            '<div class="spm-toast-wrap">'
+              '<div class="spm-toast-inner">'
+                '<div class="spm-navigation-image">{{{selected.data.contentImage}}}</div>'
+              '</div>'
+              '<div class="spm-toast-nav">'
+                '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+              '</div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'dialog-type-1': [
+        '<div class="spm-dialog spm-dialog-type1">'
+          '<div :style="selected.data.styles">'
+            '<button type="button" class="spm-dialog-close"></button>'
+            '<div class="spm-dialog-wrap">'
+              '<h3 class="spm-dialog-title">{{{selected.data.title}}}</h3>'
+              '<div class="spm-navigation-image">{{{selected.data.contentImage}}}</div>'
+              '<div class="spm-dialog-content">{{{selected.data.content}}}</div>'
+              '<div class="spm-dialog-nav">'
+                '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+              '</div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+      'dialog-type-2': [
+        '<div class="spm-dialog spm-dialog-type2">'
+          '<div :style="selected.data.styles">'
+            '<button type="button" class="spm-dialog-close" @click="destroy()"></button>'
+            '<div class="spm-dialog-wrap">'
+              '<div class="spm-navigation-image">{{{selected.data.contentImage}}}</div>'
+              '<div class="spm-dialog-nav">'
+                '<div v-for="button in selected.data.button" class="spm-{{selected.type}}-button" :style="button.styles">{{{button.label}}}</div>'
+              '</div>'
+            '</div>'
+          '</div>'
+        '</div>'
+      ].join ''
+
+    template = [
+      '<div v-show="selected.type" v-el:container :style="selected.data.animations" class="spm-{{selected.type}} {{selected.data.customClass}} {{selected.placement}} {{selected.ids.className}} {{animation}}">'
+        "#{templates[selected.data.guideType] || templates[selected.type]}"
       '</div>'
       '<div v-el:light v-show="selected.type === \'balloon\'" :style="styles.light" class="spm-navigation-navlayer"></div>'
     ].join ''
+    template
 
     stepComponent = Vue.extend
       template: template
@@ -399,21 +648,10 @@ app = $extend app,
           that.render selected
         this.$on 'clear-action', ->
           that.selected.type = ''
-        this.$els.title.addEventListener 'DOMSubtreeModified', (event) ->
-          that.setSize()
-          that.title = event.srcElement.data
-          that.editing()
-        , false
-
-        this.$els.content.addEventListener 'DOMSubtreeModified', (event) ->
-          that.setSize()
-          that.content = event.srcElement.data
-          that.editing()
-        , false
       data: ->
         selected:
           type: ''
-          position: 'top'
+          placement: 'top'
         styles:
           step:
             left: 0
@@ -452,7 +690,7 @@ app = $extend app,
               h = that.size.height
               w = that.size.width
               console.log selectSize, that.size
-              switch that.selected.position
+              switch that.selected.placement
                 when 'top'
                   x = X + (W - w) / 2
                   y = Y - delta - h
@@ -479,7 +717,7 @@ app = $extend app,
                 height: H + 2 * border + 'px'
 
             else if that.selected.type is 'dialog'
-              that.selected.position = ''
+              that.selected.placement = ''
             else if that.selected.type is 'toast'
               style = window.getComputedStyle(that.$els.container)
               selectSize = getSize that.$els.container
@@ -502,55 +740,7 @@ app = $extend app,
 
     Vue.component 'step-layer', stepComponent
 
-    Vue.directive 'element',
-      twoWay: true
-      bind: ->
-        that = this
-        #that.size = getSize that.el
-        this.el.addEventListener 'DOMSubtreeModified', (event) ->
-          size = getSize that.el
-          that.set size
-        , false
-      update: (newVal, oldVal) ->
-        that = this
-
     this.step = new Vue this.options
-
-  doneRender: ->
-    template = [
-      '<div class="xpath-setting-save-confirm" v-show="selected.done">'
-        '<div target="//api-stg.sb.v2.sprocket.bz">'
-          '{{selected}}'
-          '<strong>表示タイプ</strong>'
-          '<div class="xpath-save-content">{{selected.type}}</div>'
-          '<strong>表示位置</strong>'
-          '<div class="xpath-save-content">{{selected.position}}</div>'
-          '<strong>タイトル</strong>'
-          '<div class="xpath-save-content">{{selected.title}}</div>'
-          '<strong>コンテンツ</strong>'
-          '<div class="xpath-save-content">{{selected.content}}</div>'
-        '</div>'
-        '<div class="xpath-setting-html"></div>'
-        '<a class="xpath-copy">コピー</a>'
-        '<a class="xpath-cancel">キャンセル</a>'
-      '</div>'
-    ].join ''
-    doneComponent = Vue.extend
-      template: template
-      ready: ->
-        that = this
-        this.$on 'done-action', (selected) ->
-          that.render selected
-        this.$on 'editing-action', (data) ->
-          this.selected = $extend this.selected, data
-      data: ->
-        selected:
-          done: false
-        render: (selected) ->
-          this.selected = $extend this.selected, selected
-
-    Vue.component 'done-layer', doneComponent
-    this.done = new Vue this.options
 
 timer = setInterval ->
   if window.Vue
